@@ -12,8 +12,11 @@ import com.google.common.reflect.TypeToken
 import scala.collection.JavaConversions
 import scala.reflect.ClassTag
 
-
-// Wrapper class for defining extra methods on PCollections
+/**
+ * Wrapper class for defining extra methods on PCollections. Thyis allows us to call map, flatmap,
+ * etc on PCollections, and have the corresponding Ptransforms added to the Dataflow pipeline
+ * under the hood.
+ */
 class RichPCollection[S](val pc: PCollection[S]) {
 
   // Initialize a coder registry; we'll likely want some Scala types in here at some point
@@ -29,7 +32,7 @@ class RichPCollection[S](val pc: PCollection[S]) {
   }
 
   /**
-   * Maps over PCollection, returnig a new pcollection of results.
+   * Maps over PCollection, returing a new pcollection of results.
    */
   def map[T: ClassTag](f: S => T): PCollection[T] = {
     val mapFunction: DoFn[S, T] = new DoFn[S, T] {
@@ -45,7 +48,9 @@ class RichPCollection[S](val pc: PCollection[S]) {
     }
     pc.apply(mapTransform)
   }
-
+/**
+ * FlatMap over a PCollection, and return a new PCollection.
+ */
   def flatMap[T: ClassTag](f: S => TraversableOnce[T]): PCollection[T] = {
     val flatMapFunction: DoFn[S, T] = new DoFn[S, T] {
       override def processElement(context: DoFn[S, T]#ProcessContext): Unit = {
@@ -62,11 +67,14 @@ class RichPCollection[S](val pc: PCollection[S]) {
     }
     pc.apply(flatMapTransform)
   }
+  /** Count all elements that appear in this PCollection.  */
   def countAll() = {
     val countTransform = Count.globally[S]()
     pc.apply(countTransform)
   }
 
+  /** Count the number of time each unique element appears in this PCollection. Returns a
+    * PCollection of KVs. */
   def countPerElement() = {
     val countTransform = Count.perElement[S]()
     pc.apply(countTransform)
@@ -74,6 +82,7 @@ class RichPCollection[S](val pc: PCollection[S]) {
 }
 
 object Create {
+  /** Create a PCollection from a Scala Iterable. */
   def of[T](iter: Iterable[T])(implicit p: Pipeline): PCollection[T]= {
     p.apply(DataflowCreate.of(JavaConversions.asJavaIterable(iter)))
   }
@@ -89,6 +98,8 @@ object Create {
 abstract class Job() {
   /** Default pipeline options. Override this value for alternate options. */
   val pipelineOptions: PipelineOptions = PipelineOptionsFactory.create()
+  /** This pipeline is magically passed to the first transform to a pipeline. It is them the
+    * object we call run on. This should probably be handled in a more transparent way. */
   implicit val pipeline: Pipeline = Pipeline.create(pipelineOptions)
 
   /** Override this method to define a new, better pipeline. */
