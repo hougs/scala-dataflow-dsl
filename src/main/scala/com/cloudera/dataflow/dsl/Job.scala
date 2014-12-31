@@ -1,7 +1,8 @@
 package com.cloudera.dataflow.dsl
 
-import com.google.cloud.dataflow.sdk.Pipeline
+import com.google.cloud.dataflow.sdk.{PipelineResult, Pipeline}
 import com.google.cloud.dataflow.sdk.coders.{Coder, CoderRegistry}
+import com.google.cloud.dataflow.sdk.io.TextIO
 import com.google.cloud.dataflow.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import com.google.cloud.dataflow.sdk.transforms.{Create => DataflowCreate, Count, DoFn,
 PTransform, ParDo}
@@ -27,8 +28,26 @@ class RichPCollection[S](val pc: PCollection[S]) {
     return coders.getDefaultCoder(TypeToken.of(ct.runtimeClass)).asInstanceOf[Coder[T]]
   }
 
+  /**
+   * Maps over PCollection, returnig a new pcollection of results.
+   */
+  def map[T: ClassTag](f: S => T): PCollection[T] = {
+    val mapFunction: DoFn[S, T] = new DoFn[S, T] {
+      override def processElement(context: DoFn[S, T]#ProcessContext): Unit = {
+        context.output(f(context.element()))
+      }
+    }
+    val mapTransform = new PTransform[PCollection[S],
+      PCollection[T]]() {
+      override def apply(input: PCollection[S]) = {
+        input.apply(ParDo.of(mapFunction)).setCoder(getCoder(implicitly[ClassTag[T]]))
+      }
+    }
+    pc.apply(mapTransform)
+  }
+
   def flatMap[T: ClassTag](f: S => TraversableOnce[T]): PCollection[T] = {
-    val doFunction: DoFn[S, T] = new DoFn[S, T] {
+    val flatMapFunction: DoFn[S, T] = new DoFn[S, T] {
       override def processElement(context: DoFn[S, T]#ProcessContext): Unit = {
         for (x <- f(context.element())){
           context.output(x)
@@ -38,17 +57,20 @@ class RichPCollection[S](val pc: PCollection[S]) {
     val flatMapTransform = new PTransform[PCollection[S],
       PCollection[T]]() {
       override def apply(input: PCollection[S]) = {
-        input.apply(ParDo.of(doFunction)).setCoder(getCoder(implicitly[ClassTag[T]]))
+        input.apply(ParDo.of(flatMapFunction)).setCoder(getCoder(implicitly[ClassTag[T]]))
       }
     }
     pc.apply(flatMapTransform)
   }
-
-  def count[T]() = {
-    val countTransform = Count.globally()
+  def countAll() = {
+    val countTransform = Count.globally[S]()
     pc.apply(countTransform)
   }
 
+  def countPerElement() = {
+    val countTransform = Count.perElement[S]()
+    pc.apply(countTransform)
+  }
 }
 
 object Create {
@@ -56,21 +78,30 @@ object Create {
     p.apply(DataflowCreate.of(JavaConversions.asJavaIterable(iter)))
   }
 
+  /**
+   * Returns a PCollection created from applying a Text.IO transform for the given file pattern
+   */
+  def text(filePattern: String)(implicit p: Pipeline): PCollection[String] = {
+    p.apply(TextIO.Read.from(filePattern))
+  }
 }
 
-class Job() {
+abstract class Job() {
   /** Default pipeline options. Override this value for alternate options. */
   val pipelineOptions: PipelineOptions = PipelineOptionsFactory.create()
   implicit val pipeline: Pipeline = Pipeline.create(pipelineOptions)
 
   /** Override this method to define a new, better pipeline. */
-  def createPipeline(): Pipeline = {pipeline}
+  def createPipeline(): AnyRef = {pipeline}
 
-  def run(): Unit = {
+  def run(): PipelineResult = {
     createPipeline()
     pipeline.run()
   }
+  /** Treat a pcollection as a RichPCollection on demand. */
   implicit def pCollectionToRichPCollection[S](pc: PCollection[S]) = new RichPCollection[S](pc)
+  /** Treat a rich PCollection as a PCollection on demand. */
+  implicit def richPCollectionToPCollection[S](rpc: RichPCollection[S]) = rpc.pc
 
   implicit def tuple2kv[K, V](kv: KV[K, V]) = (kv.getKey, kv.getValue)
 
