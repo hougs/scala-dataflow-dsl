@@ -18,7 +18,25 @@ class LiterallyCountStuff extends Job {
   }
 }
 
-class TestJob extends FlatSpec {
+class TestLiteralCountingJob extends FlatSpec {
   val myjob = new LiterallyCountStuff()
   val result: PipelineResult = myjob.run()
+}
+
+class IOJob extends Job {
+  override def createPipeline() = {
+    val input = Create.text(getClass.getResource("/wordcountex.txt").getPath)
+    val perElemcount = input.flatMap(_.split("\\s+")).map(_
+      .toLowerCase).countPerElement()
+    val format = perElemcount.map( kv =>
+      s"${kv._1} : ${kv._2.toString}"
+    )
+    format.writeText("out")
+  }
+}
+
+class TestIOJob extends FlatSpec {
+  val myjob = new IOJob
+  myjob.run()
+
 }

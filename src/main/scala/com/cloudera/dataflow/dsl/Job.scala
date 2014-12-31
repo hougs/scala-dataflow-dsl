@@ -6,7 +6,7 @@ import com.google.cloud.dataflow.sdk.io.TextIO
 import com.google.cloud.dataflow.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import com.google.cloud.dataflow.sdk.transforms.{Create => DataflowCreate, Count, DoFn,
 PTransform, ParDo}
-import com.google.cloud.dataflow.sdk.values.{KV, PCollection}
+import com.google.cloud.dataflow.sdk.values.{PDone, KV, PCollection}
 import com.google.common.reflect.TypeToken
 
 import scala.collection.JavaConversions
@@ -79,6 +79,13 @@ class RichPCollection[S](val pc: PCollection[S]) {
     val countTransform = Count.perElement[S]()
     pc.apply(countTransform)
   }
+
+  /**
+   * Writes to files with given prefix. */
+  def writeText(prefix: String) = {
+    val writeTransform: PTransform[PCollection[S], PDone] = TextIO.Write.to(prefix)
+    pc.apply(writeTransform)
+  }
 }
 
 object Create {
@@ -103,7 +110,7 @@ abstract class Job() {
   implicit val pipeline: Pipeline = Pipeline.create(pipelineOptions)
 
   /** Override this method to define a new, better pipeline. */
-  def createPipeline(): AnyRef = {pipeline}
+  def createPipeline(): Any = {pipeline}
 
   def run(): PipelineResult = {
     createPipeline()
